@@ -1,0 +1,500 @@
+basePath: /api/v1
+definitions:
+  controller.Code:
+    enum:
+    - 1000
+    - 1001
+    - 1002
+    - 1003
+    - 1004
+    - 1005
+    - 1006
+    - 1007
+    - 1008
+    - 1009
+    - 1010
+    - 1011
+    - 1012
+    - 1013
+    - 1014
+    type: integer
+    x-enum-varnames:
+    - CodeSuccess
+    - CodeInternalErr
+    - CodeServerBusy
+    - CodeInvalidParam
+    - CodeUnsupportedAuthProtocol
+    - CodeInvalidToken
+    - CodeExpiredToken
+    - CodeUserExist
+    - CodeUserNotExist
+    - CodeWrongPassword
+    - CodeNeedLogin
+    - CodeExpiredLogin
+    - CodeNoSuchCommunity
+    - CodeNoSuchPost
+    - CodeVoteTimeExpire
+  controller.Response:
+    properties:
+      code:
+        allOf:
+        - $ref: '#/definitions/controller.Code'
+        description: 业务内部指定的响应码
+      data:
+        description: 响应数据
+      msg:
+        description: 响应消息
+    type: object
+  controller.ResponsePostDetail:
+    properties:
+      author_info:
+        properties:
+          author_id:
+            type: integer
+          author_name:
+            type: string
+        type: object
+      community_info:
+        properties:
+          community_id:
+            type: integer
+          community_name:
+            type: string
+          created_at:
+            type: string
+          intro:
+            type: string
+        type: object
+      post_info:
+        properties:
+          content:
+            type: string
+          created_at:
+            type: string
+          post_id:
+            type: integer
+          title:
+            type: string
+          updated_at:
+            type: string
+          vote_num:
+            type: integer
+        type: object
+    type: object
+  controller.ResponseTokens:
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+    type: object
+  controller.ResponseUserLogin:
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+      user_id:
+        type: integer
+      user_name:
+        type: string
+    type: object
+  models.CommunityDTO:
+    properties:
+      community_id:
+        type: integer
+      community_name:
+        type: string
+      introduction:
+        description: 字段为空则不参与 json 序列化
+        type: string
+    required:
+    - community_name
+    type: object
+  models.ParamCreatePost:
+    properties:
+      community_id:
+        type: integer
+      content:
+        maxLength: 8192
+        type: string
+      title:
+        maxLength: 128
+        minLength: 1
+        type: string
+    required:
+    - community_id
+    - content
+    - title
+    type: object
+  models.ParamUserLogin:
+    properties:
+      password:
+        maxLength: 64
+        minLength: 6
+        type: string
+      username:
+        maxLength: 64
+        minLength: 3
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  models.ParamUserRegist:
+    properties:
+      password:
+        maxLength: 64
+        minLength: 6
+        type: string
+      re_password:
+        type: string
+      username:
+        maxLength: 64
+        minLength: 3
+        type: string
+    required:
+    - password
+    - re_password
+    - username
+    type: object
+  models.ParamVote:
+    properties:
+      direction:
+        enum:
+        - 1
+        - 0
+        - -1
+        type: integer
+      post_id:
+        type: integer
+    required:
+    - post_id
+    type: object
+  models.PostDTO:
+    properties:
+      author_id:
+        type: integer
+      author_name:
+        type: string
+      community_created_at:
+        type: string
+      community_id:
+        type: integer
+      community_intro:
+        type: string
+      community_name:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      post_id:
+        type: integer
+      status:
+        type: integer
+      title:
+        type: string
+      update_at:
+        type: string
+      vote_num:
+        type: integer
+    required:
+    - community_name
+    - content
+    - title
+    type: object
+host: 127.0.0.1:1145
+info:
+  contact:
+    email: support@skylee.io
+    name: skylee
+    url: http://www.skylee.io/support
+  description: 包含了 NiuMa-Home 项目提供的接口
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://www.skylee.io/terms/
+  title: NiuMa-Home 接口文档
+  version: "1.0"
+paths:
+  /community/detail:
+    get:
+      consumes:
+      - application/json
+      description: 给定社区 id，获取社区详情
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 社区 id
+        in: query
+        name: community_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.CommunityDTO'
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 社区详情接口
+      tags:
+      - 社区相关接口
+  /community/list:
+    get:
+      consumes:
+      - application/json
+      description: 社区列表接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.CommunityDTO'
+                  type: array
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 社区列表接口
+      tags:
+      - 社区相关接口
+  /post/{post_id}:
+    get:
+      consumes:
+      - application/json
+      description: 创建帖子的接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 帖子 id
+        in: path
+        name: post_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/controller.ResponsePostDetail'
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取帖子详情接口
+      tags:
+      - 帖子相关接口
+  /post/create:
+    post:
+      consumes:
+      - application/json
+      description: 创建帖子的接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 帖子的详细信息
+        in: body
+        name: object
+        schema:
+          $ref: '#/definitions/models.ParamCreatePost'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 创建帖子接口
+      tags:
+      - 帖子相关接口
+  /post/list:
+    get:
+      consumes:
+      - application/json
+      description: 按社区按时间(time)或分数(score)排序查询帖子列表接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 社区 id
+        example: 1
+        in: query
+        name: community_id
+        type: integer
+      - description: 排序方式
+        enum:
+        - time
+        - score
+        in: query
+        name: orderby
+        type: string
+      - description: 页码
+        example: 1
+        in: query
+        name: page
+        type: integer
+      - description: 每页展示的 post 的数量
+        example: 10
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.PostDTO'
+                  type: array
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 帖子列表接口
+      tags:
+      - 帖子相关接口
+  /post/vote:
+    post:
+      consumes:
+      - application/json
+      description: 给指定的帖子投票的接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 投票参数
+        in: body
+        name: object
+        schema:
+          $ref: '#/definitions/models.ParamVote'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 帖子投票接口
+      tags:
+      - 帖子相关接口
+  /token/refresh:
+    get:
+      consumes:
+      - application/json
+      description: 根据 Bearer Authorization 中携带的 refresh_token，刷新 access_token
+      parameters:
+      - description: refresh_token
+        in: header
+        name: Authorization
+        type: string
+      - description: 旧的 access_token
+        in: query
+        name: access_token
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/controller.ResponseTokens'
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 刷新 access_token 接口
+      tags:
+      - Token 相关接口
+  /user/login:
+    post:
+      consumes:
+      - application/json
+      description: 用户登录接口
+      parameters:
+      - description: 用户信息（包含用户名、密码）
+        in: body
+        name: usernameANDpassword
+        schema:
+          $ref: '#/definitions/models.ParamUserLogin'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/controller.ResponseUserLogin'
+              type: object
+      summary: 用户登录接口
+      tags:
+      - 用户相关接口
+  /user/register:
+    post:
+      consumes:
+      - application/json
+      description: 用户注册接口
+      parameters:
+      - description: 用户信息（包含用户名、密码、重复密码）
+        in: body
+        name: user_info
+        schema:
+          $ref: '#/definitions/models.ParamUserRegist'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/controller.ResponseTokens'
+              type: object
+      summary: 用户注册接口
+      tags:
+      - 用户相关接口
+swagger: "2.0"
