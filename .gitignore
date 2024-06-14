@@ -1,0 +1,63 @@
+# 编译生成的二进制文件
+/bin/
+# 本地构建文件
+/pkg/
+# 依赖管理工具（如Go Modules）生成的目录
+/vendor/
+/go.sum
+/go.mod
+# Go编译器和编辑器生成的文件
+*.exe
+*.test
+*.prof
+*.out
+# 工程特定的配置文件
+/.idea/
+.vscode/
+# MacOS系统自动生成的文件
+.DS_Store
+# Windows系统自动生成的文件
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+beian.png
+
+/logs
+/config
+/docs
+/Note
+/temp
+.dockerignore
+/*.bleve
+/container
+test.go
+tmp.txt
+post_data.txt
+post_data1.txt
+niuma-server
+Dockerfile
+docker-compose.yml
