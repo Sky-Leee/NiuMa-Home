@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"net/http"
+	"niumahome/dao/bleve"
 	"niumahome/dao/elasticsearch"
+	"niumahome/dao/kafka"
+	"niumahome/dao/localcache"
 	"niumahome/dao/mysql"
 	"niumahome/dao/redis"
 	"niumahome/internal/utils"
 	"niumahome/logger"
-	"niumahome/models"
 	"niumahome/router"
 	"niumahome/settings"
 	"niumahome/workers"
@@ -33,22 +35,25 @@ func init() {
 	utils.InitToken()
 
 	mysql.InitMySQL()
-	mysql.GetDB().AutoMigrate(&models.User{})
-	mysql.GetDB().AutoMigrate(&models.Community{})
-	mysql.GetDB().AutoMigrate(&models.Post{})
-	mysql.GetDB().AutoMigrate(&models.ExpiredPostScore{})
-	mysql.GetDB().AutoMigrate(&models.CommentSubject{})
-	mysql.GetDB().AutoMigrate(&models.CommentIndex{})
-	mysql.GetDB().AutoMigrate(&models.CommentContent{})
-	mysql.GetDB().AutoMigrate(&models.CommentLikeUser{})
-	mysql.GetDB().AutoMigrate(&models.CommentHateUser{})
 	logger.Infof("Initializing MySQL successfully")
 
 	redis.InitRedis()
 	logger.Infof("Initializing Redis successfully")
 
-	elasticsearch.Init()
-	logger.Infof("Initializing Elasticsearch successfully")
+	if viper.GetBool("elasticsearch.enable") {
+		elasticsearch.Init()
+		logger.Infof("Initializing Elasticsearch successfully")
+	}
+	if viper.GetBool("bleve.enable") {
+		bleve.InitBleve()
+		logger.Infof("Initializing Bleve successfully")
+	}
+
+	kafka.InitKafka()
+	logger.Infof("Initializing Kafka successfully")
+
+	localcache.InitLocalCache()
+	logger.Infof("Initializing Localcache successfully")
 
 	router.Init()
 	logger.Infof("Initializing router successfully")
@@ -83,12 +88,14 @@ func main() {
 		// Waits for clients that are still requesting, but will force exit after the specified time has elapsed.
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(viper.GetInt64("server.shutdown_waitting_time")))
 		defer cancel()
+		logger.Infof("Shutting down HTTP Server(wait for all connections to be closed)...")
 
 		// Shutdown gracefully shuts down the server without interrupting any active connections.
 		if err := srv.Shutdown(ctx); err != nil {
 			// Error from closing listeners, or context timeout:
 			logger.Errorf("NiuMa-Home server shutdown: %v", err)
 		}
+		logger.Infof("Http server closed successfully")
 		close(idleConnsClosed)
 	}()
 
@@ -98,5 +105,8 @@ func main() {
 	}
 
 	<-idleConnsClosed // 直到 close 后，主线程才会退出
-	workers.Wait()    // 等待所有后台任务结束才退出
+	logger.Infof("Waitting for all background tasks to complete...")
+	workers.Wait() // 等待所有后台任务结束才退出
+	kafka.Wait()   // 等待消费者全部退出
+	logger.Infof("Done.\n\nniumahome server closed successfully")
 }

@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"niumahome/algorithm"
+	niumahome "niumahome/errors"
 	"strconv"
 	"time"
 
@@ -32,7 +34,7 @@ func SetPost(postID, communityID int64) error {
 	// 缓存 KeyPostScoreZset（curTimeStamp）
 	pipeline.ZAdd(ctx, KeyPostScoreZset, redis.Z{
 		Member: postID,
-		Score:  float64(curTimeStamp),
+		Score:  algorithm.GetPostScoreByReddit(time.Now().Unix(), 1), // 使用 reddit 投票算法
 	})
 
 	// 缓存 KeyPost
@@ -70,12 +72,12 @@ func GetUserPostDirection(post_id, user_id int64) (int8, error) {
 	return int8(cmd.Val()), nil
 }
 
-func SetPostScore(post_id, score int64) error {
+func SetPostScore(post_id int64, score float64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 	cmd := rdb.ZAdd(ctx, KeyPostScoreZset, redis.Z{
 		Member: post_id,
-		Score:  float64(score),
+		Score:  score,
 	})
 	if cmd.Err() != nil {
 		return errors.Wrap(cmd.Err(), "set post score")
@@ -96,18 +98,20 @@ func SetUserPostDirection(post_id, user_id int64, direction int8) error {
 	return nil
 }
 
-func GetPostIDs(pageNum, pageSize int64, orderBy string) ([]string, error) {
+func GetPostIDs(pageNum, pageSize int64, orderBy string) ([]string, int, error) {
 	var key string
 	if orderBy == "time" {
 		key = KeyPostTimeZset
-	} else {
+	} else if orderBy == "score" {
 		key = KeyPostScoreZset
+	} else {
+		return nil, 0, niumahome.ErrInvalidParam
 	}
 
 	return getPostIDHelper(key, pageNum, pageSize)
 }
 
-func GetPostIDsByCommunity(pageNum, pageSize int64, orderBy string, communityID int64) ([]string, error) {
+func GetPostIDsByCommunity(pageNum, pageSize int64, orderBy string, communityID int64) ([]string, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 
@@ -133,7 +137,7 @@ func GetPostIDsByCommunity(pageNum, pageSize int64, orderBy string, communityID 
 		pipe.Expire(ctx, key, time.Duration(tls)*time.Second)
 		_, err := pipe.Exec(ctx)
 		if err != nil {
-			return nil, errors.Wrap(err, "build cache")
+			return nil, 0, errors.Wrap(err, "build cache")
 		}
 	} else {
 		// 在过期前再次访问，可能是热点 key，重置 TTL
@@ -155,13 +159,21 @@ func GetPostVoteNum(postID string) (int64, error) {
 	return cmd.Val(), nil
 }
 
-func GetPostVoteNums(postIDs []string) ([]int64, error) {
+func GetPostUpVoteNums(postIDs []string) ([]int64, error) {
+	return getPostVoteNumHelper(postIDs, "1")
+}
+
+func GetPostDownVoteNums(postIDs []string) ([]int64, error) {
+	return getPostVoteNumHelper(postIDs, "-1")
+}
+
+func getPostVoteNumHelper(postIDs []string, opinion string) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 
 	pipe := rdb.Pipeline()
 	for _, postID := range postIDs {
-		pipe.ZCount(ctx, KeyPostVotedZsetPF+postID, "1", "1")
+		pipe.ZCount(ctx, KeyPostVotedZsetPF+postID, opinion, opinion)
 	}
 	cmds, err := pipe.Exec(ctx)
 	if err != nil {
@@ -214,7 +226,7 @@ func GetPostScores(postIDs []string) ([]int64, error) {
 // 获取过期帖子的 ID
 func GetExpiredPostID(targetTimeStamp int64) ([]string, error) {
 	// postIDs 是按照发布时间降序排序的
-	postIDs, err := getPostIDHelper(KeyPostTimeZset, 1, (1 << 62))
+	postIDs, _, err := getPostIDHelper(KeyPostTimeZset, 1, (1 << 62))
 	if err != nil {
 		return nil, errors.Wrap(err, "")
 	}
@@ -311,18 +323,21 @@ func DeleteExpiredPostInCommunity(communityID string, targetTimeStamp int64) err
 	return errors.Wrap(err, "DeletePostInCommunity: delete post in community")
 }
 
-func getPostIDHelper(key string, pageNum, pageSize int64) ([]string, error) {
+func getPostIDHelper(key string, pageNum, pageSize int64) ([]string, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 
 	start := (pageNum - 1) * pageSize
-	stop := start + pageSize
+	stop := start + pageSize - 1
 
 	cmd := rdb.ZRevRange(ctx, key, start, stop)
 	if cmd.Err() != nil {
-		return nil, errors.Wrap(cmd.Err(), "get post ids")
+		return nil, 0, errors.Wrap(cmd.Err(), "get post ids")
 	}
-	return cmd.Val(), nil
+
+	cmd1 := rdb.ZCard(ctx, key)
+
+	return cmd.Val(), int(cmd1.Val()), errors.Wrap(cmd1.Err(), "redis:getPostIDHelper: ZCard")
 }
 
 // func GetAgreeNum(post_id int64) (int64, error) {
