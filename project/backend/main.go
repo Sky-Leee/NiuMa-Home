@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"niumahome/dao/bleve"
 	"niumahome/dao/elasticsearch"
+	"niumahome/dao/email"
 	"niumahome/dao/kafka"
 	"niumahome/dao/localcache"
 	"niumahome/dao/mysql"
+	"niumahome/dao/qiniu"
 	"niumahome/dao/redis"
 	"niumahome/internal/utils"
 	"niumahome/logger"
@@ -54,6 +56,12 @@ func init() {
 
 	localcache.InitLocalCache()
 	logger.Infof("Initializing Localcache successfully")
+
+	qiniu.InitQiniuConfig()
+	logger.Infof("Initializing Qiniu Config successfully")
+
+	email.InitEmail()
+	logger.Infof("Initializing Email Service successfully")
 
 	router.Init()
 	logger.Infof("Initializing router successfully")
@@ -107,6 +115,7 @@ func main() {
 	<-idleConnsClosed // 直到 close 后，主线程才会退出
 	logger.Infof("Waitting for all background tasks to complete...")
 	workers.Wait() // 等待所有后台任务结束才退出
-	kafka.Wait()   // 等待消费者全部退出
+	logger.Infof("Waitting for all kafka consumer to exit...")
+	kafka.Wait() // 等待消费者全部退出
 	logger.Infof("Done.\n\nniumahome server closed successfully")
 }

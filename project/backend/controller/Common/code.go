@@ -23,7 +23,12 @@ const (
 	CodeNoSuchPost
 	CodeVoteTimeExpire
 
+	CodeNoSuchComment
+
 	CodeForbidden
+	CodeTimeOut
+
+	CodeInvalidVerificationCode
 )
 
 var codeMsgMap = map[Code]string{
@@ -47,7 +52,12 @@ var codeMsgMap = map[Code]string{
 	CodeNoSuchPost:     "没有该帖子",
 	CodeVoteTimeExpire: "超过投票时间",
 
+	CodeNoSuchComment: "没有该评论",
+
 	CodeForbidden: "禁止访问",
+	CodeTimeOut: "请求超时",
+
+	CodeInvalidVerificationCode: "无效验证码",
 }
 
 func (c Code) getMsg() string {

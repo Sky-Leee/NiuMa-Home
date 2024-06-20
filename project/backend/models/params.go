@@ -9,11 +9,26 @@ type ParamUserRegist struct {
 	Username   string `json:"username" binding:"required,min=3,max=64"`
 	Password   string `json:"password" binding:"required,min=6,max=64"`
 	RePassword string `json:"re_password" binding:"required,eqfield=Password"`
+	Email      string `json:"email" binding:"required,min=1,max=256"`
+	Avatar     string `json:"avatar" binding:"required,max=512"`
 }
 
 type ParamUserLogin struct {
 	Username string `json:"username" binding:"required,min=3,max=64"`
 	Password string `json:"password" binding:"required,min=6,max=64"`
+}
+
+type ParamUserUpdate struct {
+	Username string `json:"username" binding:"required,min=3,max=64"`
+	Gender   int8   `json:"gender" binding:"required,min=1,max=3"`
+	Avatar   string `json:"avatar" binding:"required"`
+	Intro    string `json:"intro" binding:"required,min=1,max=128"`
+}
+
+type ParamUserPostList struct {
+	UserID   int64 `form:"user_id" binding:"required"`
+	PageNum  int   `form:"page"`
+	PageSize int   `form:"size"`
 }
 
 /* Post */
@@ -24,7 +39,7 @@ type ParamCreatePost struct {
 }
 
 type ParamVote struct {
-	PostID    int64 `json:"post_id" binding:"required"`
+	PostID    int64 `json:"post_id,string" binding:"required"`
 	Direction int8  `json:"direction" binding:"oneof=1 0 -1"`
 }
 
@@ -42,13 +57,17 @@ type ParamPostListByKeyword struct {
 	Keyword  string `form:"keyword" binding:"required"`               // 关键字
 }
 
+type ParamPostRemove struct {
+	PostID int64 `form:"post_id,string" binding:"required"`
+}
+
 /* Comment */
 type ParamCommentCreate struct {
-	ObjID   int64  `json:"obj_id" binding:"required"`
+	ObjID   int64  `json:"obj_id,string" binding:"required"`
 	ObjType int8   `json:"obj_type" binding:"required"`
 	Message string `json:"message" binding:"required,min=1,max=8192"`
-	Root    int64  `json:"root"`
-	Parent  int64  `json:"parent"`
+	Root    int64  `json:"root,string"`
+	Parent  int64  `json:"parent,string"`
 }
 
 type ParamCommentList struct {
@@ -67,10 +86,35 @@ type ParamCommentRemove struct {
 
 type ParamCommentLike struct {
 	CommentID int64 `form:"comment_id" binding:"required"`
-	Like      int8  `form:"like" binding:"oneof=1 -1"`
+	ObjID     int64 `form:"obj_id" binding:"required"`
+	ObjType   int8  `form:"obj_type" binding:"required"`
 }
 
 type ParamCommentHate struct {
 	CommentID int64 `form:"comment_id" binding:"required"`
-	Hate      int8  `form:"hate" binding:"oneof=1 -1"`
+	ObjID     int64 `form:"obj_id" binding:"required"`
+	ObjType   int8  `form:"obj_type" binding:"required"`
+}
+
+type ParamCommentUserLikeOrHateList struct {
+	ObjID   int64 `form:"obj_id" binding:"required"`
+	ObjType int8  `form:"obj_type" binding:"required"`
+	Like    bool  `form:"like" binding:"required"`
+}
+
+/* Community */
+type ParamCommunityCreate struct {
+	CommunityID   int64  `json:"community_id" binding:"required"`
+	CommunityName string `json:"community_name" binding:"required"`
+	Introduction  string `json:"introduction" binding:"required"`
+}
+
+/* Email */
+type ParamSendEmailVerificationCode struct {
+	Email string `form:"email" binding:"required"`
+}
+
+type ParamVerifyEmailVerificationCode struct {
+	Email string `form:"email" binding:"required"`
+	Code  string `form:"code" binding:"required"`
 }

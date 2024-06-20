@@ -1,7 +1,6 @@
 package kafka
 
 import (
-	"fmt"
 	"net"
 	"niumahome/dao/localcache"
 	"strconv"
@@ -16,9 +15,11 @@ import (
 const (
 	TypeCommentCreate = iota + 1
 	TypeCommentRemove
+	TypeCommentRemoveByObjID
 	TypeLikeOrHateIncr
 	TypeLikeOrHateMappingCreate
 	TypeLikeOrHateMappingRemove
+	TypeEmailSendVerificationCode
 )
 
 const (
@@ -30,11 +31,13 @@ const (
 const (
 	TopicComment = "topic-comment"
 	TopicLike    = "topic-like"
+	TopicEmail   = "topic-email"
 )
 
 const (
 	GroupComment = "group-comment"
 	GroupLike    = "group-like"
+	GroupEmail   = "group-email"
 )
 
 var addr []string
@@ -42,11 +45,13 @@ var addr []string
 var (
 	PartitionNumOfComment = 6
 	PartitionNumOfLike    = 6
+	PartitionNumOfEmail   = 2
 )
 
 var (
 	ReplicationFactorOfComment = 1
 	ReplicationFactorOfLike    = 1
+	ReplicationFactorOfEmail   = 1
 )
 
 var (
@@ -66,6 +71,7 @@ type Result struct {
 
 var commentWriter *kafka.Writer
 var likeWriter *kafka.Writer
+var emailWriter *kafka.Writer
 
 var notifyList []chan int
 
@@ -86,21 +92,26 @@ func InitKafka() {
 		Balancer: &kafka.Hash{}, // 哈希，保证相同的 comment 在同一个 partition
 	}
 
+	emailWriter = &kafka.Writer{
+		Addr:     kafka.TCP(addr...),
+		Balancer: &kafka.RoundRobin{},
+	}
+
 	// 初始化通知列表
-	notifyList = make([]chan int, 0, PartitionNumOfComment+PartitionNumOfLike)
+	notifyList = make([]chan int, 0, PartitionNumOfComment+PartitionNumOfLike+PartitionNumOfEmail)
 
 	// 创建主题
 	createTopic(TopicComment, PartitionNumOfComment, ReplicationFactorOfComment)
 	createTopic(TopicLike, PartitionNumOfLike, ReplicationFactorOfLike)
+	createTopic(TopicEmail, PartitionNumOfEmail, ReplicationFactorOfEmail)
 
 	// 初始化 consumer
 	initConsumer(PartitionNumOfComment, ReplicationFactorOfComment, TopicComment, GroupComment)
 	initConsumer(PartitionNumOfLike, ReplicationFactorOfLike, TopicLike, GroupLike)
+	initConsumer(PartitionNumOfEmail, ReplicationFactorOfEmail, TopicEmail, GroupEmail)
 }
 
 func Wait() {
-	fmt.Println("Closing Kafka reader...")
-
 	// 通知消费者退出
 	for i := 0; i < len(notifyList); i++ {
 		notifyList[i] <- 1
@@ -135,9 +146,11 @@ func initConfig() {
 
 	PartitionNumOfComment = viper.GetInt("kafka.partition.comment")
 	PartitionNumOfLike = viper.GetInt("kafka.partition.like")
+	PartitionNumOfLike = viper.GetInt("kafka.partition.email")
 
 	ReplicationFactorOfComment = viper.GetInt("kafka.replication_factor.comment")
 	ReplicationFactorOfLike = viper.GetInt("kafka.replication_factor.like")
+	ReplicationFactorOfLike = viper.GetInt("kafka.replication_factor.email")
 
 	KafkaProducerRetryTime = viper.GetInt("kafka.retry.producer")
 	KafkaConsumerRetryTime = viper.GetInt("kafka.retry.consumer")
@@ -146,7 +159,10 @@ func initConfig() {
 
 func createTopic(topicName string, partitionNum, replicationFactor int) {
 	// 连接至任意kafka节点
-	conn, err := kafka.Dial("tcp", "localhost:9093")
+	if len(addr) == 0 {
+		panic("kafka address length should not be zero")
+	}
+	conn, err := kafka.Dial("tcp", addr[0])
 	if err != nil {
 		panic(err.Error())
 	}
@@ -186,7 +202,7 @@ func initConsumer(partitionNum, replicationFactor int, topic, group string) {
 	wg.Add(partitionNum)
 	for i := 0; i < partitionNum; i++ {
 		r := kafka.NewReader(kafka.ReaderConfig{
-			Brokers: []string{"localhost:9093", "localhost:9094", "localhost:9095"},
+			Brokers: addr,
 			Topic:   topic,
 			GroupID: group,
 		})

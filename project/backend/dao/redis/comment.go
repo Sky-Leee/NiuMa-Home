@@ -11,6 +11,23 @@ import (
 )
 
 /* niumahome:comment:index: */
+func CheckCommentIfExist(objType int8, objID int64, commentID int64) (bool, error) {
+	key := fmt.Sprintf("%v%v_%v", KeyCommentIndexZSetPF, objType, objID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	cmd := rdb.ZScore(ctx, key, strconv.FormatInt(commentID, 10))
+	if cmd.Err() != nil {
+		if errors.Is(cmd.Err(), redis.Nil) {
+			return false, nil
+		}
+		return false, errors.Wrap(cmd.Err(), "redis.CheckCommentIfExist.ZScore")
+	}
+
+	return true, nil
+}
+
 func AddCommentIndexMembers(objType int8, objID int64, commentIDs []int64, floor []int) error {
 	if len(commentIDs) != len(floor) {
 		return errors.Wrap(niumahome.ErrInternal, "redis:AddCommentIndexMember: commentIDs and floors length not equal")
@@ -32,14 +49,28 @@ func AddCommentIndexMembers(objType int8, objID int64, commentIDs []int64, floor
 	return errors.Wrap(err, "redis:AddCommentIndexMember: ZAdd")
 }
 
-func GetCommentIndexMember(objType int8, objID int64) ([]int64, error) {
+func GetCommentIndexMemberCount(objType int8, objID int64) (int, error) {
 	key := fmt.Sprintf("%v%v_%v", KeyCommentIndexZSetPF, objType, objID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 
-	cmd := rdb.ZRange(ctx, key, 0, (1 << 62))
+	cmd := rdb.ZCard(ctx, key)
+
+	return int(cmd.Val()), errors.Wrap(cmd.Err(), "redis.GetCommentIndexMemberCount.ZCard")
+}
+
+func GetCommentIndexMember(objType int8, objID, start, stop int64) ([]int64, error) {
+	key := fmt.Sprintf("%v%v_%v", KeyCommentIndexZSetPF, objType, objID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	cmd := rdb.ZRange(ctx, key, start, stop-1) // 获取 index 在 [start, stop - 1] 内的 commentID
 	if cmd.Err() != nil {
+		if errors.Is(cmd.Err(), redis.Nil) {
+			return nil, nil
+		}
 		return nil, errors.Wrap(cmd.Err(), "redis:GetCommentIndexMember: ZRange")
 	}
 	commentIDStrs := cmd.Val()
@@ -58,6 +89,16 @@ func RemCommentIndexMembersByCommentID(objType int8, objID int64, commentID int6
 
 	cmd := rdb.ZRem(ctx, key, commentID)
 	return errors.Wrap(cmd.Err(), "redis:RemCommentIndexMembersByCommentIDs: SRem")
+}
+
+func DelCommentIndexByObjID(objType int8, objID int64) error {
+	key := fmt.Sprintf("%v%v_%v", KeyCommentIndexZSetPF, objType, objID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	cmd := rdb.Del(ctx, key)
+	return errors.Wrap(cmd.Err(), "redis:DelCommentIndexByObjID: Del")
 }
 
 /* niumahome:comment:content: */
@@ -120,46 +161,46 @@ func DelCommentContentsByCommentIDs(commentIDs []int64) error {
 }
 
 /* niumahome:comment:likeset: */
-func CheckCommentLikeOrHateIfExistUser(commentID, userID, objID int64, objType int8, like bool) (bool, error) {
-	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
+// func CheckCommentLikeOrHateIfExistUser(commentID, userID, objID int64, objType int8, like bool) (bool, error) {
+// 	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
 
-	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
-	defer cancel()
+// 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+// 	defer cancel()
 
-	cmd := rdb.SIsMember(ctx, key, userID)
-	return cmd.Val(), errors.Wrap(cmd.Err(), "redis:CheckCommentLikeOrHateIfExistUser: SIsMember")
-}
+// 	cmd := rdb.SIsMember(ctx, key, userID)
+// 	return cmd.Val(), errors.Wrap(cmd.Err(), "redis:CheckCommentLikeOrHateIfExistUser: SIsMember")
+// }
 
-func AddCommentLikeOrHateUser(commentID, userID, objID int64, objType int8, like bool) error {
-	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
+// func AddCommentLikeOrHateUser(commentID, userID, objID int64, objType int8, like bool) error {
+// 	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
 
-	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
-	defer cancel()
+// 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+// 	defer cancel()
 
-	cmd := rdb.SAdd(ctx, key, userID)
+// 	cmd := rdb.SAdd(ctx, key, userID)
 
-	return errors.Wrap(cmd.Err(), "redis:AddCommentLikeOrHateUser: SAdd")
-}
+// 	return errors.Wrap(cmd.Err(), "redis:AddCommentLikeOrHateUser: SAdd")
+// }
 
-func RemCommentLikeOrHateUser(commentID, userID, objID int64, objType int8, like bool) error {
-	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
+// func RemCommentLikeOrHateUser(commentID, userID, objID int64, objType int8, like bool) error {
+// 	key := getCommentLikeOrHateSetKey(commentID, objID, objType, like)
 
-	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
-	defer cancel()
+// 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+// 	defer cancel()
 
-	cmd := rdb.SRem(ctx, key, userID)
-	return errors.Wrap(cmd.Err(), "redis:RemCommentLikeOrHateUser: SRem")
-}
+// 	cmd := rdb.SRem(ctx, key, userID)
+// 	return errors.Wrap(cmd.Err(), "redis:RemCommentLikeOrHateUser: SRem")
+// }
 
-// 批量删除指定主题下的评论
-func DelCommentLikeOrHateUserByCommentIDs(commentIDs []int64, objID int64, objType int8, like bool) error {
-	keys := make([]string, len(commentIDs))
-	for i := 0; i < len(keys); i++ {
-		keys[i] = getCommentLikeOrHateSetKey(commentIDs[i], objID, objType, like)
-	}
+// // 批量删除指定主题下的评论
+// func DelCommentLikeOrHateUserByCommentIDs(commentIDs []int64, objID int64, objType int8, like bool) error {
+// 	keys := make([]string, len(commentIDs))
+// 	for i := 0; i < len(keys); i++ {
+// 		keys[i] = getCommentLikeOrHateSetKey(commentIDs[i], objID, objType, like)
+// 	}
 
-	return DelKeys(keys)
-}
+// 	return DelKeys(keys)
+// }
 
 /* niumahome:comment:rem:cid */
 func AddCommentRemCid(commentID int64) error {
@@ -249,6 +290,17 @@ func GetCommentLikeOrHateCountByKeys(keys []string) ([]int, error) {
 }
 
 /* niumahome:comment:userlikeids: */
+func CheckCommentUserLikeOrHateMappingIfExistComment(commentID, userID, objID int64, objType int8, like bool) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	key := getCommentUserLikeOrHateMappingKey(userID, objID, objType, like)
+
+	cmd := rdb.SIsMember(ctx, key, commentID)
+
+	return cmd.Val(), errors.Wrap(cmd.Err(), "redis:CheckCommentUserLikeOrHateMappingIfExistComment: SIsMember")
+}
+
 func AddCommentUserLikeOrHateMappingByCommentIDs(userID, objID int64, objType int8, like bool, commentIDs []int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
@@ -264,12 +316,7 @@ func AddCommentUserLikeOrHateMappingByCommentIDs(userID, objID int64, objType in
 	if err != nil {
 		return errors.Wrap(err, "redis:AddCommentUserLikeOrHateMappingByCommentIDs: SAdd")
 	}
-	expireTime := CommentUserLikeExpireTime
-	if !like {
-		expireTime = CommentUserHateExpireTime
-	}
-	cmd := rdb.Expire(ctx, key, expireTime)
-	return errors.Wrap(cmd.Err(), "redis:AddCommentUserLikeOrHateMappingByCommentIDs: Expire")
+	return nil
 }
 
 func GetCommentUserLikeOrHateList(userID, objID int64, objType int8, like bool) ([]int64, error) {
@@ -302,12 +349,22 @@ func RemCommentUserLikeOrHateMapping(userID, commentID, objID int64, objType int
 	return errors.Wrap(cmd.Err(), "redis:RemCommentUserLikeOrHateMapping: SRem")
 }
 
-func getCommentLikeOrHateSetKey(commentID, objID int64, objType int8, like bool) string {
-	pf := KeyCommentLikeSetPF
-	if !like {
-		pf = KeyCommentHateSetPF
+/* lua */
+
+/* comment_like_or_hate_lua */
+func EvalCommentLikeOrHate(commentID, userID, objID int64, objType int8, like bool) error {
+	keys := []string{
+		getCommentUserLikeOrHateMappingKey(userID, objID, objType, like),
+		KeyCommentRemCidSet,
+		getCommentLikeOrHateStringKey(commentID, like),
 	}
-	return fmt.Sprintf("%s%d_%d_%d", pf, commentID, objID, objType)
+
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	cmd := rdb.EvalSha(ctx, shaCommentLikeOrHate, keys, commentID)
+
+	return errors.Wrap(cmd.Err(), "redis:EvalCommentLikeOrHate")
 }
 
 func getCommentLikeOrHateStringKey(commentID int64, like bool) string {

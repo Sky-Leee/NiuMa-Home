@@ -4,25 +4,31 @@ type Post struct {
 	ID          int64  `gorm:"type:bigint;auto_increment" json:"id"`
 	PostID      int64  `gorm:"type:bigint;not null;unique" json:"post_id"`
 	CommunityID int64  `gorm:"type:bigint;not null;" json:"community_id" binding:"required"`
-	AuthorID    int64  `gorm:"type:bigint;not null;" json:"author_id"`
+	AuthorID    int64  `gorm:"type:bigint;not null;index:idx_author_id" json:"author_id"`
 	Status      int8   `gorm:"type:tinyint;not null;default 1;" json:"status"`
-	Title       string `gorm:"type:varchar(128);not null;index:idx_title" json:"title" binding:"required"`
-	Content     string `gorm:"type:longtext;not null;index:idx_content" json:"content" binding:"required"`
+	Title       string `gorm:"type:varchar(128);not null;" json:"title" binding:"required"`
+	Content     string `gorm:"type:longtext;not null;" json:"content" binding:"required"`
 	CreatedAt   Time   `gorm:"type:timestamp default CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt   Time   `gorm:"type:timestamp default CURRENT_TIMESTAMP" json:"update_at"`
+}
+
+type ExpiredPostScore struct {
+	PostID      int64 `gorm:"primaryKey" json:"post_id"`
+	PostScore   int64 `json:"post_score"`
+	PostVoteNum int64 `json:"post_vote_num"`
 }
 
 type PostDoc struct {
 	PostID    int64  `json:"post_id"`
 	Title     string `json:"title"`
 	Content   string `json:"content"`
-	CreatedAt Time   `json:"created_time"`
+	CreatedAt any    `json:"created_time"`
 }
 
 type PostDTO struct {
-	UserID      int64 `json:"author_id"`
+	UserID      int64 `json:"author_id,string"`
 	CommunityID int64 `json:"community_id"`
-	PostID      int64 `json:"post_id"`
+	PostID      int64 `json:"post_id,string"`
 
 	CommunityName string `json:"community_name" binding:"required"`
 	UserName      string `json:"author_name"`
@@ -37,4 +43,9 @@ type PostDTO struct {
 	CommunityCreatedAt Time `json:"community_created_at"`
 
 	VoteNum int64 `json:"vote_num"`
+}
+
+type PostListDTO struct {
+	Total int        `json:"total"`
+	Posts []*PostDTO `json:"posts"`
 }

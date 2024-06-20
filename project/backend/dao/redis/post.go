@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"niumahome/algorithm"
 	niumahome "niumahome/errors"
 	"strconv"
@@ -321,6 +322,15 @@ func DeleteExpiredPostInCommunity(communityID string, targetTimeStamp int64) err
 
 	_, err := pipe.Exec(ctx)
 	return errors.Wrap(err, "DeletePostInCommunity: delete post in community")
+}
+
+func DeletePostInCommunity(communityID int64, postIDs []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	key := fmt.Sprintf("%v%v", KeyPostCommunityZsetPF, communityID)
+	cmd := rdb.ZRem(ctx, key, postIDs)
+	return errors.Wrap(cmd.Err(), "redis:DeletePostInCommunity: ZRem")
 }
 
 func getPostIDHelper(key string, pageNum, pageSize int64) ([]string, int, error) {

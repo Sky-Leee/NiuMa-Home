@@ -3,12 +3,10 @@ package kafka
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"niumahome/dao/localcache"
 	"niumahome/dao/mysql"
 	"niumahome/logger"
 
-	"log"
 	"time"
 
 	"github.com/pkg/errors"
@@ -32,7 +30,6 @@ rootloop:
 		// 检查是否应该退出循环
 		select {
 		case <-ch:
-			fmt.Println("exit.")
 			break rootloop
 		default:
 		}
@@ -43,11 +40,10 @@ rootloop:
 		msgs, err := fetchMessages(ctx, consumer, batchSize)
 		if err != nil {
 			if !errors.Is(err, context.DeadlineExceeded) { // 其它错误
-				log.Printf("err: kafka:FetchMessages: %v\n", err.Error())
+				logger.Errorf("kafka.FetchMessages: %v", err.Error())
 			}
 			continue
 		}
-		log.Printf("fetch msgs' length: %v", len(msgs))
 
 		success := false
 		for i := 0; i < KafkaConsumerRetryTime; i++ {
@@ -78,7 +74,7 @@ rootloop:
 
 			if err != nil { // 说明在整个事务中，出现了错误，需要回滚事务，「不」向 kafka server 提交 offset
 				// 打印日志
-				log.Printf("kafka:CommentConsumer: convertAndConsume error: %v\n", err.Error())
+				logger.Errorf("kafka:CommentConsumer: convertAndConsume error: %v", err.Error())
 
 				// 回滚事务
 				tx.Rollback()
@@ -136,6 +132,9 @@ func convertAndConsume(tx *gorm.DB, consumer *kafka.Reader, msg kafka.Message) (
 	case TypeCommentRemove:
 		return handleCommentRemove(tx, data)
 
+	case TypeCommentRemoveByObjID:
+		return handleCommentRemoveByObjID(tx, data)
+
 	case TypeLikeOrHateIncr:
 		return handleLikeOrHateIncr(tx, data)
 
@@ -144,6 +143,9 @@ func convertAndConsume(tx *gorm.DB, consumer *kafka.Reader, msg kafka.Message) (
 
 	case TypeLikeOrHateMappingRemove:
 		return handleLikeOrHateMappingRemove(tx, data)
+
+	case TypeEmailSendVerificationCode:
+		return handleEmailSendVerificationCode(data)
 	}
 
 	return res.UniqueKey, ErrTypeNoError, nil
@@ -204,6 +206,20 @@ func handleCommentRemove(tx *gorm.DB, data []byte) (string, int, error) {
 	return res.UniqueKey, ErrTypeNoError, nil
 }
 
+func handleCommentRemoveByObjID(tx *gorm.DB, data []byte) (string, int, error) {
+	var params CommentRemoveByObjID
+	err := json.Unmarshal(data, &params)
+	if err != nil {
+		return "", ErrTypeConvert, errors.Wrap(err, "kafka:handleCommentRemoveByObjID: Unmarshal(params)")
+	}
+	res := removeCommentsByObjID(tx, params)
+	if res.Err != nil {
+		return "", ErrTypeTransaction, errors.Wrap(res.Err, "kafka:handleCommentRemoveByObjID: removeCommentsByObjID")
+	}
+
+	return res.UniqueKey, ErrTypeNoError, nil
+}
+
 func handleLikeOrHateIncr(tx *gorm.DB, data []byte) (string, int, error) {
 	var params LikeOrHateIncr
 	err := json.Unmarshal(data, &params)
@@ -245,6 +261,24 @@ func handleLikeOrHateMappingRemove(tx *gorm.DB, data []byte) (string, int, error
 	res := removeCommentUserLikeMappingByCommentIDs(tx, params.CommentID)
 	if res.Err != nil {
 		return "", ErrTypeTransaction, errors.Wrap(res.Err, "kafka:handleLikeOrHateMappingRemoveByCommentIDs: incrCommentIndexCountField")
+	}
+
+	return res.UniqueKey, ErrTypeNoError, nil
+}
+
+func handleEmailSendVerificationCode(data []byte) (string, int, error) {
+	var params EmailSendVerificationCode
+	err := json.Unmarshal(data, &params)
+	if err != nil {
+		return "", ErrTypeConvert, errors.Wrap(err, "kafka:handleEmailSend: Unmarshal(params)")
+	}
+
+	if err != nil {
+		return "", ErrTypeConvert, errors.Wrap(err, "kafka:handleEmailSend: ConvertStringSliceToInt64Slice")
+	}
+	res := sendEmailVerificationCode(params)
+	if res.Err != nil {
+		return "", ErrTypeTransaction, errors.Wrap(res.Err, "kafka:handleEmailSend: sendEmail")
 	}
 
 	return res.UniqueKey, ErrTypeNoError, nil

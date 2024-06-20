@@ -28,11 +28,12 @@ const (
 	KeyCommentContentStringPF = "niumahome:comment:content:"     // param:comment_id, value:content
 	KeyCommentLikeStringPF    = "niumahome:comment:like:"        // param comment_id, member: count
 	KeyCommentHateStringPF    = "niumahome:comment:hate:"        // param comment_id, member: count
-	KeyCommentLikeSetPF       = "niumahome:comment:likeset:"     // param cid_oid_otype, member: user_id
-	KeyCommentHateSetPF       = "niumahome:comment:hateset:"     // param cid_oid_otype, member: user_id
 	KeyCommentUserLikeIDsPF   = "niumahome:comment:userlikeids:" // param uid_oid_otype, member: comment_id
 	KeyCommentUserHateIDsPF   = "niumahome:comment:userhateids:" // param uid_oid_otype, member: comment_id
 	KeyCommentRemCidSet       = "niumahome:comment:rem:cid"      // member: comment_id
+
+	// email
+	KeyEmailVerificationCodeStringPF = "niumahome:email:verification:" // param: user_email, value: verification_code
 )
 
 var Nil = redis.Nil

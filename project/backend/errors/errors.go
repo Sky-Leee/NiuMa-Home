@@ -14,6 +14,7 @@ var (
 	ErrExpiredToken = errors.New("过期的 Token")
 	ErrNotFound     = errors.New("未找到")
 	ErrInternal     = errors.New("内部错误")
+	ErrTimeout      = errors.New("请求超时")
 
 	// community
 	ErrNoSuchCommunity = errors.New("没有该社区")
@@ -22,9 +23,16 @@ var (
 	ErrNoSuchPost     = errors.New("没有该帖子")
 	ErrVoteTimeExpire = errors.New("超过投票时间")
 
+	// comment
+	ErrNoSuchComment = errors.New("没有该评论")
+
 	// params
 	ErrInvalidParam = errors.New("无效参数")
 
 	// permissions
 	ErrForbidden = errors.New("禁止访问")
+
+	// email
+	ErrInvalidVerificationCode = errors.New("无效验证码")
+	ErrEmailExist              = errors.New("邮箱已存在")
 )

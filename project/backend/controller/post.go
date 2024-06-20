@@ -7,6 +7,7 @@ import (
 	"niumahome/logger"
 	"niumahome/logic"
 	"niumahome/models"
+	"niumahome/objects"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -104,10 +105,12 @@ func PostDetailHandler(ctx *gin.Context) {
 		return
 	}
 
-	post, err := logic.GetPostDetailByID(post_id)
+	post, err := logic.GetPostDetailByID(post_id, true)
 	if err != nil {
 		if errors.Is(err, niumahome.ErrNoSuchPost) {
 			common.ResponseError(ctx, common.CodeNoSuchPost)
+		} else if errors.Is(err, niumahome.ErrTimeout) {
+			common.ResponseError(ctx, common.CodeTimeOut)
 		} else {
 			common.ResponseError(ctx, common.CodeInternalErr)
 			// 打日志
@@ -119,7 +122,7 @@ func PostDetailHandler(ctx *gin.Context) {
 	// 合并一下，方便看
 	common.ResponseSuccess(ctx, &common.ResponsePostDetail{
 		AuthorInfo: struct {
-			AuthorID   int64  "json:\"author_id\""
+			AuthorID   int64  "json:\"author_id,string\""
 			AuthorName string "json:\"author_name\""
 		}{
 			AuthorID:   post.UserID,
@@ -137,7 +140,7 @@ func PostDetailHandler(ctx *gin.Context) {
 			CreatedAt:     post.CommunityCreatedAt,
 		},
 		PostInfo: struct {
-			PostID    int64       "json:\"post_id\""
+			PostID    int64       "json:\"post_id,string\""
 			Title     string      "json:\"title\""
 			Content   string      "json:\"content\""
 			CreatedAt models.Time "json:\"created_at\""
@@ -208,7 +211,7 @@ func PostVoteHandler(ctx *gin.Context) {
 //	@Produce		application/json
 //	@Param			object	query	models.ParamPostList	false	"查询参数"
 //	@Security		ApiKeyAuth
-//	@Success		200	{object}	common.Response{data=[]models.PostDTO}
+//	@Success		200	{object}	common.Response{data=[]models.PostListDTO}
 //	@Router			/post/list [get]
 func PostListHandler(ctx *gin.Context) {
 	// 解析数据
@@ -225,15 +228,70 @@ func PostListHandler(ctx *gin.Context) {
 		return
 	}
 
-	list, err := logic.GetAllPostList(params)
+	list, total, err := logic.GetAllPostList(params)
 
 	if err != nil {
+		if errors.Is(err, niumahome.ErrInvalidParam) {
+			common.ResponseError(ctx, common.CodeInvalidParam)
+		} else {
+			common.ResponseError(ctx, common.CodeInternalErr)
+			logger.ErrorWithStack(err)
+		}
+		return
+	}
+
+	common.ResponseSuccess(ctx, &models.PostListDTO{
+		Total: total,
+		Posts: list,
+	})
+}
+
+// PostSearchHandler 帖子搜索接口
+//
+//	@Summary		帖子搜索接口
+//	@Description	使用 bleve 实现，根据关键字搜索帖子，包含过期帖子
+//	@Tags			帖子相关接口
+//	@Accept			application/json
+//	@Produce		application/json
+//	@Param			object	query	models.ParamPostListByKeyword	false	"查询参数"
+//	@Security		ApiKeyAuth
+//	@Success		200	{object}	common.Response{data=[]models.PostListDTO}
+//	@Router			/post/search [get]
+func PostSearchHandler(ctx *gin.Context) {
+	// 解析数据
+	params := &models.ParamPostListByKeyword{
+		PageNum:  DefaultPageNum,
+		PageSize: DefaultPageSize,
+		OrderBy:  "correlation", // 这里使用相关性作为默认排序规则
+	}
+	if err := ctx.ShouldBindQuery(params); err != nil {
+		msg := utils.ParseToValidationError(err)
+		common.ResponseErrorWithMsg(ctx, common.CodeInvalidParam, msg)
+		return
+	}
+	// 拒绝服务
+	if params.PageNum*params.PageSize >= 1e4 {
+		common.ResponseErrorWithMsg(ctx, common.CodeInvalidParam, "Too much data requested")
+		return
+	}
+
+	// 关键字检索
+	postList, total, err := logic.GetPostListByKeyword(params)
+	if err != nil {
+		if errors.Is(err, niumahome.ErrInvalidParam) {
+			common.ResponseError(ctx, common.CodeInvalidParam)
+			return
+		}
 		common.ResponseError(ctx, common.CodeInternalErr)
 		logger.ErrorWithStack(err)
 		return
 	}
 
-	common.ResponseSuccess(ctx, list)
+	// 返回帖子列表
+	common.ResponseSuccess(ctx, &models.PostListDTO{
+		Total: total,
+		Posts: postList,
+	})
 }
 
 // PostSearchHandler2 帖子搜索接口
@@ -245,7 +303,7 @@ func PostListHandler(ctx *gin.Context) {
 //	@Produce		application/json
 //	@Param			object	query	models.ParamPostListByKeyword	false	"查询参数"
 //	@Security		ApiKeyAuth
-//	@Success		200	{object}	common.Response{data=[]models.PostDTO}
+//	@Success		200	{object}	common.Response{data=[]models.PostListDTO}
 //	@Router			/post/search2 [get]
 func PostSearchHandler2(ctx *gin.Context) {
 	// 解析数据
@@ -266,7 +324,7 @@ func PostSearchHandler2(ctx *gin.Context) {
 	}
 
 	// 关键字检索
-	postList, err := logic.GetPostListByKeyword2(params)
+	postList, total, err := logic.GetPostListByKeyword2(params)
 	if err != nil {
 		if errors.Is(err, niumahome.ErrInvalidParam) {
 			common.ResponseError(ctx, common.CodeInvalidParam)
@@ -278,5 +336,83 @@ func PostSearchHandler2(ctx *gin.Context) {
 	}
 
 	// 返回帖子列表
-	common.ResponseSuccess(ctx, postList)
+	common.ResponseSuccess(ctx, &models.PostListDTO{
+		Total: total,
+		Posts: postList,
+	})
+}
+
+// PostHotController 火热帖子列表接口
+//
+//	@Summary		火热帖子列表接口
+//	@Description	获取火热帖子列表
+//	@Tags			帖子相关接口
+//	@Accept			application/json
+//	@Produce		application/json
+//	@Security		ApiKeyAuth
+//	@Success		200	{object}	common.Response{data=[]models.PostListDTO}
+//	@Router			/post/hot [get]
+func PostHotController(ctx *gin.Context) {
+	list, err := logic.GetHotPostList()
+	if err != nil {
+		if errors.Is(err, niumahome.ErrTimeout) {
+			common.ResponseError(ctx, common.CodeTimeOut)
+			return
+		}
+		common.ResponseError(ctx, common.CodeInternalErr)
+		logger.ErrorWithStack(err)
+		return
+	}
+
+	common.ResponseSuccess(ctx, &models.PostListDTO{
+		Total: len(list),
+		Posts: list,
+	})
+}
+
+// PostRemoveHandler 删除帖子接口
+//
+//	@Summary		删除帖子接口
+//	@Description	根据 post_id 删除帖子及其下所有评论
+//	@Tags			帖子相关接口
+//	@Accept			application/json
+//	@Produce		application/json
+//	@Param			Authorization	header	string					false	"Bearer 用户令牌"
+//	@Param			object			query	models.ParamPostRemove	false	"查询参数"
+//	@Security		ApiKeyAuth
+//	@Success		200	{object}	common.Response
+//	@Router			/post/remove [delete]
+func PostRemoveHandler(ctx *gin.Context) {
+	params := models.ParamPostRemove{}
+
+	if err := ctx.ShouldBindQuery(&params); err != nil {
+		common.ResponseErrorWithMsg(ctx, common.CodeInvalidParam, utils.ParseToValidationError(err))
+		return
+	}
+
+	value, exists := ctx.Get("user_id")
+	if !exists {
+		common.ResponseError(ctx, common.CodeInternalErr)
+		// 打日志
+		logger.Errorf("controller.PostVoteHandler: get user_id from context failed")
+		return
+	}
+	userID := value.(int64)
+
+	// 删除帖子
+	if err := logic.RemovePost(userID, params); err != nil {
+		if errors.Is(err, niumahome.ErrForbidden) {
+			common.ResponseError(ctx, common.CodeForbidden)
+		} else {
+			common.ResponseError(ctx, common.CodeInternalErr)
+			logger.ErrorWithStack(err)
+		}
+		return
+	}
+
+	// 删除评论
+	// 根据 objID、objType 删除其下所有评论
+	logic.RemoveCommentsByObjID(params.PostID, objects.ObjPost)
+
+	common.ResponseSuccess(ctx, nil)
 }

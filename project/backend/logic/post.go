@@ -44,16 +44,17 @@ func CreatePost(post *models.Post) error {
 	}
 
 	doc := models.PostDoc{
-		PostID:    post.PostID,
-		Title:     utils.Substr(post.Title, 0, 64),    // 只索引前 64 个字符
-		Content:   utils.Substr(post.Content, 0, 256), // 只索引前 256 个字符
-		CreatedAt: time.Now(),
+		PostID:  post.PostID,
+		Title:   utils.Substr(post.Title, 0, 64),    // 只索引前 64 个字符
+		Content: utils.Substr(post.Content, 0, 256), // 只索引前 256 个字符
 	}
 	var err error
 	if viper.GetBool("elasticsearch.enable") {
+		doc.CreatedAt = models.Time(time.Now())
 		err = elasticsearch.CreatePost(&doc)
 	}
 	if viper.GetBool("bleve.enable") {
+		doc.CreatedAt = time.Now()
 		err = bleve.CreatePost(&doc)
 	}
 	return errors.Wrap(err, "logic:CreatePost: index post doc")
@@ -61,16 +62,8 @@ func CreatePost(post *models.Post) error {
 
 func GetPostDetailByID(id int64, needIncrView bool) (detail *models.PostDTO, err error) {
 	if needIncrView {
-		newMember, err := localcache.IncrView(objects.ObjPost, id, 1)
-		if err != nil {
+		if err := localcache.IncrView(objects.ObjPost, id, 1); err != nil {
 			logger.Warnf("logic:GetPostDetailByID: IncrView failed(post)")
-		} else if newMember { // 如果是新创建的 member，在 redis 中记录创建时间，用于统计一个时间段的 view
-			if err := localcache.SetViewCreateTime(objects.ObjPost, id, time.Now().Unix()); err != nil {
-				logger.Warnf("logic:GetPostDetailByID: SetViewCreateTime(post) failed")
-				// 应该保证事务一致性原则（回滚 incr 操作）
-				// 这里简单处理，不考虑回滚失败
-				localcache.IncrView(objects.ObjPost, id, -1)
-			}
 		}
 	}
 
@@ -262,102 +255,117 @@ func GetPostListByKeyword(params *models.ParamPostListByKeyword) ([]*models.Post
 	return list, total, err
 }
 
+/*
+*
+
+	根据 postIDs 获取帖子列表
+	返回的 posts 的 content 不一定是完整的
+*/
 func GetPostListByIDs(postIDs []string) ([]*models.PostDTO, error) {
-	list := make([]*models.PostDTO, len(postIDs))
-	missPostIDs := make([]string, 0, len(postIDs))
+	// 创建映射用于最后的结果组装
+	resultMap := make(map[string]*models.PostDTO, len(postIDs))
+	missPostIDs := []string{} // 记录缓存未命中的 ID
+
 	// 先查 local cache
-	for idx, postID := range postIDs {
+	for _, postID := range postIDs {
 		cacheKey := fmt.Sprintf("%v_%v", objects.ObjPost, postID)
-		postDetail, err := localcache.GetLocalCache().Get(cacheKey)
-		if err == nil {
-			list[idx] = postDetail.(*models.PostDTO)
-		} else { // local cache miss
+		if postDetail, err := localcache.GetLocalCache().Get(cacheKey); err == nil {
+			resultMap[postID] = postDetail.(*models.PostDTO)
+		} else {
 			missPostIDs = append(missPostIDs, postID)
 		}
-	}
 
+		// 递增访问量
+		id, _ := strconv.ParseInt(postID, 10, 64)
+		localcache.IncrView(objects.ObjPost, id, 1)
+	}
 	// 在 mysql 中查询缓存未命中的 post list
 	if len(missPostIDs) != 0 {
 		sfkey := strings.Join(missPostIDs, "_")
 		timeout := time.Second * time.Duration(viper.GetInt("service.timeout"))
-		rps := viper.GetInt("service.rps")
-		interval := time.Second / time.Duration(rps)
+		interval := time.Second / time.Duration(viper.GetInt("service.rps"))
 
 		_missPostList, err := utils.SfDoWithTimeout(&postListGrp, sfkey, timeout, interval, func() (any, error) {
 			return mysql.SelectPostListByPostIDs(missPostIDs)
 		})
 
-		// missPostList, err := mysql.SelectPostListByPostIDs(missPostIDs)
 		if err != nil {
-			return nil, errors.Wrap(err, "get post list from mysql")
+			return nil, errors.Wrap(err, "logic:GetPostListByIDs: SelectPostListByPostIDs")
 		}
 		missPostList := _missPostList.([]*models.PostDTO)
 
-		// 组装数据
-		idx := 0
-		for i := 0; i < len(list); i++ {
-			if list[i] == nil {
-				if idx >= len(missPostList) {
-					// 传进来的 postID 在 db 中也没有，postID 不合法，或者 db 数据丢失
-					return nil, errors.Wrap(niumahome.ErrInternal, "logic:GetPostListByIDs: idx >= len(missPostList)")
-				}
-				list[i] = missPostList[idx]
-				idx++
+		// 获取过期帖子 ID
+		expiredPostIDs := make([]string, 0)
+		for i := 0; i < len(missPostList); i++ {
+			if missPostList[i].Status == 1 {
+				expiredPostIDs = append(expiredPostIDs, strconv.FormatInt(missPostList[i].PostID, 10))
+			}
+		}
+		var voteNums []int64
+		// 在 MySQL 中查询过期帖子的投票数
+		if len(expiredPostIDs) != 0 {
+			sfkey := strings.Join(expiredPostIDs, "_")
+			timeout := time.Second * time.Duration(viper.GetInt("service.timeout"))
+			rps := viper.GetInt("service.rps")
+			interval := time.Second / time.Duration(rps)
+
+			_voteNums, err := utils.SfDoWithTimeout(&postVoteNumGrp, sfkey, timeout, interval, func() (any, error) {
+				return mysql.SelectPostVoteNumsByIDs(expiredPostIDs)
+			})
+			if err != nil {
+				return nil, err
+			}
+			voteNums = _voteNums.([]int64)
+		}
+
+		// Assembling the resultMap
+		for _, post := range missPostList {
+			postIDStr := strconv.FormatInt(post.PostID, 10)
+			resultMap[postIDStr] = post
+		}
+
+		if len(expiredPostIDs) != len(voteNums) {
+			logger.Warnf("logic:GetPostListByIDs: len(expiredPostIDs) != len(voteNums)")
+		} else {
+			for idx, postID := range expiredPostIDs {
+				resultMap[postID].VoteNum = voteNums[idx]
 			}
 		}
 	}
 
-	// 获取过期帖子 ID
-	expiredPostIDs := make([]string, 0)
-	for i := 0; i < len(list); i++ {
-		if list[i].Status == 1 {
-			expiredPostIDs = append(expiredPostIDs, strconv.FormatInt(list[i].PostID, 10))
-		}
-	}
-
-	// 在 mysql 中查询每个过期 post 的投票数
-	voteNumsFromMySQL := make([]int64, 0)
-	var err error
-	if len(expiredPostIDs) != 0 {
-		sfkey := strings.Join(expiredPostIDs, "_")
-		timeout := time.Second * time.Duration(viper.GetInt("service.timeout"))
-		rps := viper.GetInt("service.rps")
-		interval := time.Second / time.Duration(rps)
-
-		_voteNumsFromMySQL, err := utils.SfDoWithTimeout(&postVoteNumGrp, sfkey, timeout, interval, func() (any, error) {
-			return mysql.SelectPostVoteNumsByIDs(expiredPostIDs)
-		})
-		// voteNumsFromMySQL, err = mysql.SelectPostVoteNumsByIDs(expiredPostIDs)
-		if err != nil {
-			return nil, err
-		}
-		voteNumsFromMySQL = _voteNumsFromMySQL.([]int64)
-	}
-
-	// 在 redis 中查询每个 post 的投票数（如果帖子过期，查询仍会成功，且 votenum 为 0）
-	voteNumsFromRedis, err := redis.GetPostUpVoteNums(postIDs)
+	// 结合 Redis 计票数逻辑
+	voteNumsFromRedis, err := redis.GetPostUpVoteNums(missPostIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	// not expected
-	if len(voteNumsFromRedis) != len(list) {
-		return nil, niumahome.ErrInternal
+	// 为每个 post 添加分数字段
+	for i, postID := range missPostIDs {
+		resultMap[postID].VoteNum += voteNumsFromRedis[i]
 	}
 
-	// 为每个 post 添加分数字段
-	cur := 0
-	for i := 0; i < len(list); i++ {
-		if list[i].Status == 0 { // 没有过期，使用 redis 的数据
-			list[i].VoteNum = voteNumsFromRedis[i]
-		} else { // 过期，使用 mysql 的数据
-			list[i].VoteNum = voteNumsFromMySQL[cur]
-			cur++
+	// 构造最终返回的 post list
+	list := make([]*models.PostDTO, 0, len(resultMap))
+	for _, postID := range postIDs {
+		if post, exists := resultMap[postID]; exists {
+			list = append(list, post)
+		} else {
+			return nil, errors.Wrap(niumahome.ErrInternal, "logic:GetPostListByIDs: post not found")
 		}
 	}
 
-	// 返回
 	return list, nil
+}
+
+func GetPostListByAuthorID(params models.ParamUserPostList) (int, []*models.PostDTO, error) {
+	start := (params.PageNum - 1) * params.PageSize
+
+	postList, err := mysql.SelectPostsByAuthorID(params.UserID, start, params.PageSize)
+	if err != nil {
+		return 0, nil, errors.Wrap(err, "logic:GetPostListByAuthorID: SelectPostsByAuthorID")
+	}
+	total, err := mysql.SelectPostCountByAuthorID(params.UserID)
+	return total, postList, errors.Wrap(err, "logic:GetPostListByAuthorID: SelectPostCountByAuthorID")
 }
 
 func GetHotPostList() ([]*models.PostDTO, error) {
@@ -378,6 +386,109 @@ func GetHotPostList() ([]*models.PostDTO, error) {
 	}
 
 	return posts.([]*models.PostDTO), nil
+}
+
+func RemovePost(userID int64, params models.ParamPostRemove) error {
+	// 鉴权
+	// 1. 获取 Post 的元数据（author_id、status）
+	post, err := mysql.SelectPostDetailByID(params.PostID)
+	if err != nil {
+		return errors.Wrap(err, "logic:RemovePost: SelectPostDetailByID")
+	}
+	// 2. 判断 user_id 与 author_id 是否相等
+	// 后续可以引入管理员
+	if userID != post.UserID {
+		return niumahome.ErrForbidden
+	}
+
+	// 删除 Post
+	// 事务删除
+	// 判断 status
+	tx := mysql.GetDB().Begin()
+	if err := mysql.DeletePostDetailByPostID(tx, post.PostID); err != nil {
+		tx.Rollback()
+		return errors.Wrap(err, "logic:RemovePost: DeletePostDetailByPostID")
+	}
+	// 如果为 0，说明帖子没有过期，删除 post 表对应记录即可
+	// 如果为 1，说明帖子过期，除了删除 post 表对应记录，还要删除 expired_post_scores 对应记录
+	if post.Status == 1 {
+		if err := mysql.DeletePostExpiredScoresByPostID(tx, post.PostID); err != nil {
+			tx.Rollback()
+			return errors.Wrap(err, "logic:RemovePost: DeletePostExpiredScoresByPostID")
+		}
+	}
+	tx.Commit()
+
+	// 判断 status，如果为 0，还要删除 redis 中的相关记录
+	// 删除失败，简单处理如下：重试 5 次，每次间隔时间从 1s 开始指数增加
+	// 后续可以引入消息队列，可以重新入队
+	if post.Status == 0 {
+		postIDStr := strconv.FormatInt(post.PostID, 10)
+		tmp := []string{postIDStr}
+
+		success := make([]bool, 4)
+		duration := 1
+		retry := 0
+		maxRetry := 5
+
+		for ; retry < maxRetry; retry++ {
+			if retry > 0 {
+				time.Sleep(time.Second * time.Duration(duration))
+			}
+			// 删除 score
+			if !success[0] {
+				if err = redis.DeletePostScores(tmp); err != nil {
+					continue
+				}
+				success[0] = true
+			}
+			// 删除 post_time
+			if !success[1] {
+				if err = redis.DeletePostTimes(tmp); err != nil {
+					continue
+				}
+				success[1] = true
+			}
+			// 删除 voted:post_id
+			if !success[2] {
+				if err = redis.DeletePostVotedNums(tmp); err != nil {
+					continue
+				}
+				success[2] = true
+			}
+			if !success[3] {
+				if err = redis.DeletePostInCommunity(post.CommunityID, tmp); err != nil {
+					continue
+				}
+				success[3] = true
+			}
+			break
+		}
+
+		if retry == maxRetry {
+			return errors.Wrap(err, "logic:RemovePost: Remove post metadata failed")
+		}
+	}
+
+	if viper.GetBool("bleve.enable") {
+		// 删 bleve 搜索引擎中的索引
+		err = bleve.DeletePost(params.PostID)
+		if err != nil {
+			logger.Errorf("remove post from bleve failed, reason: %v", err.Error())
+		}
+	}
+	if viper.GetBool("elasticsearch.enable") {
+		// 删 elasticsearch 搜索引擎中的索引
+		err = elasticsearch.DeletePost(params.PostID)
+		if err != nil {
+			logger.Errorf("remove post from elasticsearch failed, reason: %v", err.Error())
+		}
+	}
+
+	// 删除本地缓存
+	cacheKey := fmt.Sprintf("%v_%v", objects.ObjPost, post.PostID)
+	localcache.GetLocalCache().Remove(cacheKey)
+	return nil
 }
 
 type ReturnValueFromSearch struct {

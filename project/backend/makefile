@@ -3,6 +3,8 @@
 # 设置 Go 可执行文件名
 EXECUTABLE := niumahome
 
+SERVER_EXECUTABLE := niumahome-server
+
 # 设置输出目录
 BUILD_DIR := bin
 
@@ -10,7 +12,7 @@ BUILD_DIR := bin
 GO := go
 
 # 设置配置文件路径
-CONFIG_PATH = ./config/config1.json
+CONFIG_PATH = ./config/config_test.json
 
 .PHONY: all clean
 
@@ -31,3 +33,6 @@ run:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+linux:
+	GOOS=linux GOARCH=amd64 $(GO) build -o $(SERVER_EXECUTABLE)
