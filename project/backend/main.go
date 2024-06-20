@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"net/http"
+	"niumahome/dao/elasticsearch"
 	"niumahome/dao/mysql"
 	"niumahome/dao/redis"
 	"niumahome/internal/utils"
@@ -36,10 +37,18 @@ func init() {
 	mysql.GetDB().AutoMigrate(&models.Community{})
 	mysql.GetDB().AutoMigrate(&models.Post{})
 	mysql.GetDB().AutoMigrate(&models.ExpiredPostScore{})
+	mysql.GetDB().AutoMigrate(&models.CommentSubject{})
+	mysql.GetDB().AutoMigrate(&models.CommentIndex{})
+	mysql.GetDB().AutoMigrate(&models.CommentContent{})
+	mysql.GetDB().AutoMigrate(&models.CommentLikeUser{})
+	mysql.GetDB().AutoMigrate(&models.CommentHateUser{})
 	logger.Infof("Initializing MySQL successfully")
 
 	redis.InitRedis()
 	logger.Infof("Initializing Redis successfully")
+
+	elasticsearch.Init()
+	logger.Infof("Initializing Elasticsearch successfully")
 
 	router.Init()
 	logger.Infof("Initializing router successfully")

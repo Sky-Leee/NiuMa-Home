@@ -17,12 +17,15 @@ definitions:
     - 1012
     - 1013
     - 1014
+    - 1015
+    - 1016
     type: integer
     x-enum-varnames:
     - CodeSuccess
     - CodeInternalErr
     - CodeServerBusy
     - CodeInvalidParam
+    - CodeNotFound
     - CodeUnsupportedAuthProtocol
     - CodeInvalidToken
     - CodeExpiredToken
@@ -34,6 +37,7 @@ definitions:
     - CodeNoSuchCommunity
     - CodeNoSuchPost
     - CodeVoteTimeExpire
+    - CodeForbidden
   controller.Response:
     properties:
       code:
@@ -99,6 +103,54 @@ definitions:
       user_name:
         type: string
     type: object
+  models.CommentDTO:
+    properties:
+      author_action:
+        properties:
+          liked:
+            type: boolean
+          replied:
+            type: boolean
+        type: object
+      comment_id:
+        type: integer
+      content:
+        properties:
+          message:
+            type: string
+        type: object
+      created_at:
+        type: string
+      floor:
+        type: integer
+      like:
+        type: integer
+      obj_id:
+        type: integer
+      parent:
+        type: integer
+      replies:
+        items:
+          $ref: '#/definitions/models.CommentDTO'
+        type: array
+      root:
+        type: integer
+      type:
+        type: integer
+      update_at:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  models.CommentListDTO:
+    properties:
+      comments:
+        items:
+          $ref: '#/definitions/models.CommentDTO'
+        type: array
+      total:
+        type: integer
+    type: object
   models.CommunityDTO:
     properties:
       community_id:
@@ -110,6 +162,25 @@ definitions:
         type: string
     required:
     - community_name
+    type: object
+  models.ParamCommentCreate:
+    properties:
+      message:
+        maxLength: 8192
+        minLength: 1
+        type: string
+      obj_id:
+        type: integer
+      obj_type:
+        type: integer
+      parent:
+        type: integer
+      root:
+        type: integer
+    required:
+    - message
+    - obj_id
+    - obj_type
     type: object
   models.ParamCreatePost:
     properties:
@@ -210,14 +281,194 @@ info:
     email: support@skylee.io
     name: skylee
     url: http://www.skylee.io/support
-  description: 包含了 NiuMa-Home 项目提供的接口
+  description: 包含了 Blue-Bell 项目提供的接口
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
   termsOfService: http://www.skylee.io/terms/
-  title: NiuMa-Home 接口文档
+  title: Blue-Bell 接口文档
   version: "1.0"
 paths:
+  /comment/create:
+    post:
+      consumes:
+      - application/json
+      description: 创建（发送）评论接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - description: 帖子的详细信息
+        in: body
+        name: object
+        schema:
+          $ref: '#/definitions/models.ParamCommentCreate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.CommentDTO'
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 创建（发送）评论接口
+      tags:
+      - 评论相关接口
+  /comment/hate:
+    post:
+      consumes:
+      - application/json
+      description: 给评论点踩的接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - in: query
+        name: comment_id
+        required: true
+        type: integer
+      - enum:
+        - 1
+        - -1
+        in: query
+        name: hate
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 评论点踩接口
+      tags:
+      - 评论相关接口
+  /comment/like:
+    post:
+      consumes:
+      - application/json
+      description: 给评论点赞的接口
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - in: query
+        name: comment_id
+        required: true
+        type: integer
+      - enum:
+        - 1
+        - -1
+        in: query
+        name: like
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 评论点赞接口
+      tags:
+      - 评论相关接口
+  /comment/list:
+    get:
+      consumes:
+      - application/json
+      description: 可以根据楼层（floor）或者点踩数（like）排序的评论列表接口
+      parameters:
+      - in: query
+        name: obj_id
+        required: true
+        type: integer
+      - in: query
+        name: obj_type
+        required: true
+        type: integer
+      - description: 排序方式
+        enum:
+        - floor
+        - like
+        in: query
+        name: orderby
+        type: string
+      - description: 页码
+        example: 1
+        in: query
+        name: page
+        type: integer
+      - description: 每页展示的 post 的数量
+        example: 10
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.CommentListDTO'
+                  type: array
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 评论列表接口
+      tags:
+      - 评论相关接口
+  /comment/remove:
+    delete:
+      consumes:
+      - application/json
+      description: 根据 comment_id 删除评论，及子评论
+      parameters:
+      - description: Bearer 用户令牌
+        in: header
+        name: Authorization
+        type: string
+      - in: query
+        name: comment_id
+        required: true
+        type: integer
+      - in: query
+        name: obj_id
+        required: true
+        type: integer
+      - in: query
+        name: obj_type
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.Response'
+      security:
+      - ApiKeyAuth: []
+      summary: 删除评论接口
+      tags:
+      - 评论相关接口
   /community/detail:
     get:
       consumes:
@@ -342,10 +593,6 @@ paths:
       - application/json
       description: 按社区按时间(time)或分数(score)排序查询帖子列表接口
       parameters:
-      - description: Bearer 用户令牌
-        in: header
-        name: Authorization
-        type: string
       - description: 社区 id
         example: 1
         in: query
@@ -385,6 +632,53 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: 帖子列表接口
+      tags:
+      - 帖子相关接口
+  /post/search2:
+    get:
+      consumes:
+      - application/json
+      description: 使用 elasticsearch 实现，根据关键字搜索帖子，包含过期帖子
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        required: true
+        type: string
+      - description: 排序方式
+        enum:
+        - time
+        - correlation
+        in: query
+        name: orderby
+        type: string
+      - description: 页码
+        example: 1
+        in: query
+        name: page
+        type: integer
+      - description: 每页展示的 post 的数量
+        example: 10
+        in: query
+        name: size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/controller.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.PostDTO'
+                  type: array
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 帖子搜索接口
       tags:
       - 帖子相关接口
   /post/vote:
